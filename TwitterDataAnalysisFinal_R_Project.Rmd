@@ -1,0 +1,341 @@
+---
+title: "Twitter Sentimental Analysis on COVID-19"
+author: "Vinit Kishor Dhande (20202078)"
+date: "23 December 2020"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# Abstract
+
+Words express various sentiments, feelings, opinions etc. These opinions help us in understanding the context of the text it is used in. Now a days, there are lot of social media platforms like Facebook and Twitter, where people can express their opinions about the things happening across the world. Tracking these opinions tell us what these people feel about these things. Finding these underlying meanings in the text is known as sentiment analysis or opinion mining. This study aims to analyze the sentiments of the twitter users on the COVID-19 pandemic. We are using the recent 2000 tweets obtained by hitting the twitter API. We have used  the natural language processing(NLP) concepts using various packages that we haven  not used in the course or assignments. Using this type of analysis we can assess what people are thinking about the current situation of the pandemic, so that Government can take further decisions keeping in mind the response of citizens.
+Also, here we are trying to show the use of various packages related to the Natural Language Processing and also demonstrate the use of S4 classes. 
+
+## Reading the data from twitter API
+
+First of all, we need to create a developer account on the Twitter website (https://developer.twitter.com/).  Next, we need to create an application in this account to access the twitter data using R or Python. Once, we have created this, we will get the
+four most important details to obtain the data i.e consumer key, consumer secret, access token and access secret. We can also reset these keys once the work is done. Here, we are using rtweet package to access the twitter data via api. We need to create a token which would be used as an authentication for the api. We have used the search_tweets function to access the tweets with option include_rts as FALSE which excludes the retweets on #covid. Also, we will get the mixed tweets including the top and random tweets.
+
+```{r task1,message=FALSE}
+#install the package rtweet which can be used to access the twitter api
+#install.packages("rtweet")
+
+# load rtweet library to access the twitter api
+library(rtweet)
+
+# create token using the app and credentials we have created (Do not disclose these keys)
+twitter_token <- create_token(
+  app = "SDA for Practice",
+  consumer_key <- "GwFBgAq7BfmeWa7imgONHiBGd",
+  consumer_secret <-"us9TWy7MhG06ihZLX1FlfK0XwyGAqoOfcpDbaktoGCaNJE5ZU2",
+  access_token <- "1257940995439824896-U40zzDtvlOMxYU7dHSzjkmpnRUoP8c",
+  access_secret <- "UUmlAsbxfRBsgiatSocaLraGlO4OieTD25FfcDEpbpr0F" )
+
+  
+## search for 2000 tweets using the #covid hashtag
+keyword <- "#covid"
+covid_tweets <- search_tweets(q = keyword,
+                               n = 2000, include_rts = FALSE, type = "mixed" )
+head(covid_tweets, 2)
+
+```
+
+##  Summary of the data
+
+We have printed the summary of the few columns in dataset we have fetched from the API. If we look at the column created_at, we can say that all of the tweets are from the past two days as we have only 2000 tweets. Also, we have numerical columns such as followers_count, friends_count and favourites_count which shows that mean number of followers, friends and favourites around 30000, 3000 and 10000 respectively. These numbers may change once we run the code again as the data will be different each time. We also have a binary column which shows whether the account is verified or not. We can see that 95% of the tweets are coming from the verified users.
+
+
+```{r task12,message=FALSE}
+
+#summary of the dataset
+summary(covid_tweets[,c('text',"favourites_count","friends_count","followers_count","verified", "created_at","country","source", "retweet_count")])
+
+```
+
+##  Boxplots and Histogram for the numerical data
+
+If we look at the histogram and boxplot, we can see there is huge tail along the right side of the graph which shows that the data is skewed. This is because we have loaded the mixed tweets which contains the top tweets along with the other tweets. Also, from the boxplot we can see the upper whisker is huge and hence we can confirm the skewness of the data. There is only one point which causes the tail to move towards the top of boxplot, if we remove this point we can get the better view of the other data points. 
+
+```{r task13,message=FALSE}
+
+hist(covid_tweets$friends_count, freq=FALSE, xlab="friends_count", breaks="FD",main="Histogram for the friends_count")
+
+boxplot(covid_tweets$friends_count, main="Boxplots for friends_count",
+        ylab="friends_count",
+        col="orange",
+        border="brown", las =2)
+
+```
+
+##  Plot the source of twitters from where people have twitted
+
+Here, we have used ggplot2 and dplyr package to create a dataset first for the top 15 sources of tweets and plot them to get the notion of the sources of twitter data.ggplot2 is a data visualization package in R used for statistical programming and dplyr is package which contains a set of functions used for dataframe manipulation. From the below plot, we can depict that most of the tweets are coming from the iPhone, Web App, Android and iPad. Also, from the country plot we can get the locations of the country from where people have tweeted. It seems that most of the tweets are coming from the United States, United Kingdom, India, Brazil and France.
+
+```{r task2,message=FALSE}
+
+#import the packages dplyr and ggplot2
+library(ggplot2)
+library(dplyr)
+
+##Source of tweets
+covid_tweets %>% filter(source != "") %>%
+  count(source, sort = TRUE) %>% 
+  mutate(source = reorder(source, n)) %>%
+  top_n(15) %>%
+  ggplot(aes(x = source, y = n)) +
+  geom_col() +
+  coord_flip() +
+  labs(x = "Source",
+       y = "Count",
+       title = "Source of the Tweets")
+
+##country of tweets
+covid_tweets %>% filter(country != "") %>%
+  count(country, sort = TRUE) %>% 
+  mutate(country = reorder(country, n)) %>%
+  top_n(15) %>%
+  ggplot(aes(x = country, y = n)) +
+  geom_col() +
+  coord_flip() +
+  labs(x = "Country",
+       y = "Count",
+       title = "Country of the Tweets")
+
+```
+
+##  Cleaning the text
+
+Text data contains alot of information which is irrelevant and can affect the sentiment analysis process. So we need to remove this irrelevant data as a part of the pre-processing step. We need to create a cleaned text in order to analyse the sentiments of the data.  gsub() is used to manipulate string data in R. We have used gsub function to replace the links, keyword we have used for searching tweets, mentions, hashtags, tabs and extra spaces in the text. 
+
+```{r task3,message=FALSE}
+sentenceCleaning <- function(texts) {
+  #lower the text
+  cleanedTweet <-tolower(texts)
+  #replace the links
+  cleanedTweet <- gsub('http.* *', '',cleanedTweet)
+  #remove hashtags from start and end
+  cleanedTweet <- gsub("\\s*\\B#\\w+(?:\\s*#\\w+)*\\s*$", "", cleanedTweet)
+  #remove mentions
+  cleanedTweet <- gsub('@\\w+', "", cleanedTweet)
+  #remove punctuation
+  cleanedTweet <- gsub('[[:punct:]]', "", cleanedTweet)
+  cleanedTweet <- gsub('[[:cntrl:]]', "", cleanedTweet)
+  cleanedTweet <- gsub('\\d+', "", cleanedTweet)
+  cleanedTweet <- gsub("amp", "", cleanedTweet)
+  #remove tabs
+  cleanedTweet <- gsub('[ |\t]{2,}', "", cleanedTweet)
+  
+  #remove spaces from beginning and end
+  cleanedTweet <- gsub("^ ", "", cleanedTweet)
+  cleanedTweet <- gsub(" $", "", cleanedTweet)
+  #remove the keyword i.e covid in this case
+  cleanedTweet <- gsub("covid", "", cleanedTweet)
+  return(cleanedTweet)
+}
+
+covid_tweets$cleanedTexts <- sentenceCleaning(covid_tweets$text)
+
+head(covid_tweets$cleanedTexts)
+
+```
+
+##  Wordcloud of most used words in the tweets
+
+In the sentimental analysis, it is very important to have a look at what words people are using in their opinions. For this purpose, I have used three packages namely wordcloud, tm and ROAuth. Text contains words which don't contribute much towards their meaning. Such words are known as stop words. Removing these stop words from the sentences will give us important words which can be further used. So we have removed the stopwords by using the tm package to remove words such as of, and, the etc. We can obtain this by using removeWords function. Later, we can create a dataframe which shows the words with their frequencies. We have created a function which will take the words and frequency as input and will show the wordcloud in those lists. For outputting the function, we have created a S4 class  wordcloud_class.
+From th wordcloud, we can clearly tell that the words like vaccine, people, lockdown and health are amongst the most used words to express. With these words, Christmas is also used because people are feared about how virus will affect people in this festive season because of crowd in market.
+
+```{r task4,message=FALSE}
+#install the below packages wordcloud for showing the most used words, tm for text mining and ROAuth for users to authenticate via OAuth to the server
+
+#install.packages("wordcloud")
+#install.packages("tm")
+#install.packages("ROAuth")
+library(wordcloud)
+library(tm)
+library(ROAuth)
+
+#TermDocumentMatrix is used to represent the words in the text as a table or matrix of numbers. Also, Corpus function is used to convert the character vector to a list.
+documentMatrix <- as.matrix(TermDocumentMatrix(tm_map(Corpus(VectorSource(covid_tweets$cleanedTexts)), removeWords, stopwords("english"))) )
+
+documentMatrix <- as.matrix(documentMatrix) 
+words <- sort(rowSums(documentMatrix),decreasing=TRUE) 
+worddf <- data.frame(word = names(words),freq=words)
+
+print(head(worddf))
+
+wordcloudf <- function(words,freq) {
+  return(wordcloud(words = words, freq = freq,min.freq = 15,colors = brewer.pal(10,"Spectral"),
+                   random.color = TRUE,max.words = 50,random.order=FALSE, rot.per=0.35,
+                   scale=c(3,0.25)))
+}
+
+
+#defining the S4 class
+wordcloud_class <- setClass("wordcloud_class", representation(wordCloud = 'ANY', summaryF = 'ANY'))
+#creating a class
+wordcloud_class <- new("wordcloud_class", wordCloud = wordcloudf(worddf$word,worddf$freq), summaryF = summary(worddf))
+wordcloud_class@summaryF
+
+```
+
+## Help file for the wordcloud_class 
+
+### Description
+
+wordcloud_class is used to show the wordcloud for the words used in a particular text. Also, it can be used to get the summary of the datasets provided.
+
+### Usage
+
+new("wordcloud_class", wordCloud , summaryF)
+
+### Arguments
+
+representation : a list of slots (or attributes)
+
+### Details
+
+Wordcloud is a well known process for the sentimental analysis of reviews. We can get the presentation of words which are used in the tweets by its frequency. The second method gives us the summary of any dataframe provided in the function.
+
+### Value
+
+*wordcloud* - returns the wordcloud for the words with frequency more than 15. 
+*summaryF* - can be used to print the summary of the dataset provided.
+
+### Examples
+
+wordcloud_class <- new("wordcloud_class", wordCloud = wordcloudf(worddf$word,worddf$freq), summaryF = summary(worddf))
+
+
+## Create a class for numeric
+
+Here, we have created a class to show the total and average of the numeric columns provided. This is different than the class we have created before as the method used in previous was for any solution, but this class will give only numeric output.
+
+```{r task41,message=FALSE}
+         
+#defining the S4 class
+summaries <- setClass("summaries", representation(total = "numeric", average = "numeric"))
+#creating a class
+summaries <- new("summaries", total = sum(covid_tweets$favourites_count), average =mean(covid_tweets$favourites_count) )
+print(summaries@total)
+print(summaries@average)
+
+```
+
+## Help file for the wordcloud_class 
+
+### Description
+
+summaries is used to get the numerical summaries of the data like total and average.
+
+### Usage
+
+new("summaries", total , average)
+
+### Arguments
+
+representation : a list of slots (or attributes)
+
+### Value
+
+*total* - returns the numeric value
+*average* - returns the numeric value
+
+### Examples
+
+summaries <- new("summaries", total = sum(covid_tweets$favourites_count), average =mean(covid_tweets$favourites_count) )
+
+
+## Getting the sentiment values with the use of Tidytext package
+
+We can access to several sentiment lexicons through the tidytext package. The function get_sentiments() allows us to get specific sentiment lexicons with the appropriate measures for each one.The bing lexicon categorizes words into positive and negative categories while the AFINN lexicon assigns words with a score between -5 and 5 where negative scores indicates level of negativity and positive scores indicates level of positivity.Also, the nrc lexicon categorizes words into positive, negative, anger, anticipation, disgust, fear, joy, sadness, surprise, and trust by creating column for each of the category.
+We can use spread() to seperate negative and positive sentiment, and calculate a net sentiment (positive - negative).
+
+
+```{r task1_2, echo=FALSE,message=FALSE}
+#install.packages("textdata")
+library(tidytext)
+library(tidyr)
+
+#For afinn
+sentiments <- worddf %>% 
+  inner_join(get_sentiments("afinn")) %>% 
+  group_by(word) %>% 
+  summarise(sentiment = sum(value)) 
+
+print("Sentiments using AFINN lexicon")
+print(head(sentiments))
+
+#For bing
+sentiments <- worddf %>%
+  inner_join(get_sentiments("bing")) %>%
+  count(word,  sentiment) %>%
+  spread(sentiment, n, fill = 0) %>%
+  mutate(sentiment = positive - negative)
+
+print("Sentiments using BING lexicon")
+print(head(sentiments))
+
+#For nrc
+sentiments <- worddf %>%
+  inner_join(get_sentiments("nrc")) %>%
+  count(word,  sentiment) %>%
+  spread(sentiment, n, fill = 0) 
+
+print("Sentiments using NRC lexicon")
+print(head(sentiments))
+
+
+```
+
+## Analyze the emotions in the tweets
+
+This is one of the most important part of the sentimental analysis where we analyze the emotions of the users based on their opinions. We need to install the package syuzhet to use the function get_nrc_sentiment which gives use the emotions of the words used in the sentences.We also tried to plot these sentiments using the ggplot which demonstrates that lot of tweets shows the positivity, trust and anticipation. This may be effect of the vaccine as it is in market now. Though people are also feared and negative about the pandemic.We can also find that very few people shows anger, disgust, joy and surprise.
+
+```{r task5,message=FALSE}
+#get sentiments form tweets
+#install.packages("syuzhet")
+library("syuzhet")
+
+overallSentiment <- get_nrc_sentiment(covid_tweets$text)
+tweetSentiments <- data.frame(colSums(overallSentiment[,]))
+names(tweetSentiments) <- "counts"
+tweetSentiments <- cbind("sentiment" = rownames(tweetSentiments), tweetSentiments)
+rownames(tweetSentiments) <-NULL
+
+print(tweetSentiments)
+
+ggplot(data = tweetSentiments, aes(x=sentiment,y=counts))+geom_bar(aes(fill=sentiment), stat="identity")+
+  theme(legend.position = "none")+ xlab("Sentiments in Tweets") + ylab("Count of Tweets")+ ggtitle("Sentiments of Twitter Users for COVID-19")
+
+```
+
+
+## Wordcloud using Wrodcloud2 package
+
+As plotted above, we can also plot the wordcloud using wordcloud2 package. In this function, we can also provide the shape of the plot. It covered almost all words from which those are clearly visible which have frequency greater than most of the other word. The size of the words becomes narrow as the frequency goes down.
+
+```{r task6,message=FALSE}
+
+#install.packages("wordcloud2")
+library(wordcloud2)
+wordcloud2(data=worddf, size = 0.7, shape = 'hexagon')
+
+```
+
+## Conclusion
+
+Sentiment analysis provides a way to understand the reviews and opinions expressed in the textual manner. This study explains the sentiments of the tweets based on the COVID-19 pandemic. It suggests that the people are more concerned about the effect of vaccine and the Christmas. However, the emotional analysis demonstrates that people are feared though the sentiments shows some trust and positivity about the coronavirus. Also, we have presented the use of various packages in Natural Language Processing including suyzhet, tm, wordclod and ROAuth. We have shown the use of wordcloud to review the sentiments in the text which can also be helpful for the decision makers to assess the real condition. We have also seen that the most of the tweets are coming from the United States, United Kingdom, India, France and Brazil which are the most affected countries by coronavirus. With the implementation of vaccine, people have started discussing about the vaccines and it can be observed from the tweets. 
+Also, we have used the S4 class to visualize the wordcloud and the summary of the dataframes. This study can be used further to predict the future conditions with the help of reviews analysis and decide how people will react to the decisions taken by the Government.
+
+## References
+
+1. GitConnected: https://levelup.gitconnected.com/sentiment-analysis-with-twitter-hashtags-in-r-af02655f2113
+2. TowardsDataScience: https://towardsdatascience.com/create-a-word-cloud-with-r-bde3e7422e8a
+3. EarthDataScience: https://www.earthdatascience.org/courses/earth-analytics/get-data-using-apis/use-twitter-api-r/
+4. Tidytext: https://cran.r-project.org/web/packages/tidytext/vignettes/tidytext.html
